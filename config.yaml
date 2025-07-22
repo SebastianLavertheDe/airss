@@ -1,0 +1,24 @@
+platforms:
+  twitter:
+    names:
+      - id: "GitHub_Daily"
+        name: "GitHub每日精选推文"
+      - id: "dotey"
+        name: "宝玉"
+      - id: "AnthropicAI"
+        name: "AnthropicAI"
+      - id: "OpenAI"
+        name: "OpenAI"
+    rss_url: 
+      - https://rsshub.pseudoyu.com/twitter/user/{username}
+      - https://rsshub.pseudoyu.com/x/user/{username}
+      - https://rsshub.bestblogs.dev/twitter/user/{username}
+      - https://rsshub.bestblogs.dev/x/user/{username}
+  
+  weibo:
+    names:
+      - id: "5722964389"
+        name: "GitHub中国官方微博"
+    rss_url: 
+      - https://rsshub.bestblogs.dev/weibo/user/{username}
+      - https://rsshub.pseudoyu.com/weibo/user/{username} 
