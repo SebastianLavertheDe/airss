@@ -1,2 +1,4 @@
 feedparser>=6.0.0
 PyYAML>=6.0
+notion-client>=2.2.1
+python-dotenv>=1.0.0
