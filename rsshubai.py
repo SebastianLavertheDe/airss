@@ -6,11 +6,15 @@ import yaml
 import os
 import json
 import hashlib
+import re
+import requests
+import mimetypes
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime, timezone
 from notion_client import Client
 from dotenv import load_dotenv
+from urllib.parse import urlparse, parse_qs
 
 # 加载 .env 环境变量
 load_dotenv()
@@ -387,7 +391,7 @@ class NotionManager:
         try:
             if not published_str or published_str == "无时间":
                 return datetime.now(timezone.utc).isoformat()
-            
+
             # 尝试解析常见的时间格式
             from email.utils import parsedate_to_datetime
             dt = parsedate_to_datetime(published_str)
@@ -395,27 +399,209 @@ class NotionManager:
         except Exception as e:
             print(f"⚠️ 时间解析失败: {e}, 使用当前时间")
             return datetime.now(timezone.utc).isoformat()
+
+    def _download_image_from_url(self, url: str, save_dir: str = "./downloads") -> str:
+        """下载远程图片并保存到本地"""
+        try:
+            os.makedirs(save_dir, exist_ok=True)
+
+            # 获取基本文件名
+            path_part = urlparse(url).path
+            filename_base = os.path.basename(path_part) or "image"
+
+            # 获取扩展名
+            query = parse_qs(urlparse(url).query)
+            ext = query.get("format", ["jpg"])[0] if query.get("format") else "jpg"
+
+            # 如果文件名已经有扩展名，就不重复添加
+            if not filename_base.endswith(f".{ext}"):
+                filename = f"{filename_base}.{ext}"
+            else:
+                filename = filename_base
+
+            filepath = os.path.join(save_dir, filename)
+
+            # 下载图片
+            headers = {"User-Agent": "Mozilla/5.0"}
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+
+            with open(filepath, "wb") as f:
+                f.write(response.content)
+
+            print(f"📥 图片下载成功: {filepath}")
+            return filepath
+
+        except Exception as e:
+            print(f"❌ 图片下载失败: {url}\n错误: {e}")
+            raise
+
+    def _create_upload_object(self) -> dict:
+        """创建Notion文件上传对象"""
+        notion_key = os.getenv("notion_key")
+        resp = requests.post(
+            "https://api.notion.com/v1/file_uploads",
+            headers={
+                "Authorization": f"Bearer {notion_key}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json"
+            },
+            json={}  # 空JSON
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def _send_upload_content(self, upload_id: str, filepath: str) -> dict:
+        """发送文件内容到Notion"""
+        notion_key = os.getenv("notion_key")
+        mime = mimetypes.guess_type(filepath)[0] or "image/png"
+
+        with open(filepath, "rb") as f:
+            r = requests.post(
+                f"https://api.notion.com/v1/file_uploads/{upload_id}/send",
+                headers={
+                    "Authorization": f"Bearer {notion_key}",
+                    "Notion-Version": "2022-06-28"
+                },
+                files={"file": (os.path.basename(filepath), f, mime)}
+            )
+        r.raise_for_status()
+        return r.json()
+
+    def _upload_image_to_notion(self, image_url: str) -> Optional[str]:
+        """将图片上传到Notion并返回file_upload_id"""
+        try:
+            print(f"🔄 开始上传图片到Notion: {image_url}")
+
+            # 1. 下载图片到本地
+            local_path = self._download_image_from_url(image_url)
+
+            # 2. 创建上传对象
+            upload_obj = self._create_upload_object()
+            upload_id = upload_obj["id"]
+            print(f"📤 创建上传对象成功: {upload_id}")
+
+            # 3. 发送文件内容
+            self._send_upload_content(upload_id, local_path)
+            print(f"✅ 图片上传成功: {upload_id}")
+
+            # 4. 清理本地文件
+            try:
+                os.remove(local_path)
+                print(f"🗑️ 已清理本地文件: {local_path}")
+            except:
+                pass
+
+            return upload_id
+
+        except Exception as e:
+            print(f"❌ 图片上传失败: {e}")
+            return None
     
-    def _clean_text(self, text: str, max_length: int = 10000) -> str:
-        """清理文本内容，移除HTML标签并限制长度"""
+    def _convert_twitter_image_url(self, url: str) -> str:
+        """将Twitter图片URL转换为代理URL，避免Notion访问被拒绝"""
+        try:
+            # 解码HTML实体
+            import html
+            from urllib.parse import quote_plus
+
+            decoded_url = html.unescape(url).strip()
+
+            # 检查是否是Twitter图片
+            if 'pbs.twimg.com' in decoded_url or 'twimg.com' in decoded_url:
+                # 移除https://前缀，因为代理服务不需要
+                clean_url = decoded_url.replace('https://', '').replace('http://', '')
+
+                # 使用images.weserv.nl代理服务
+                proxy_url = f'https://images.weserv.nl/?url={quote_plus(clean_url)}'
+
+                print(f"🔄 Twitter图片代理转换:")
+                print(f"   原始URL: {decoded_url}")
+                print(f"   代理URL: {proxy_url}")
+
+                return proxy_url
+
+            # 非Twitter图片直接返回
+            return decoded_url
+
+        except Exception as e:
+            print(f"⚠️ 图片URL转换失败: {e}")
+            return url
+
+    def _extract_image_urls(self, text: str) -> List[str]:
+        """从HTML内容中提取图片URL"""
+        if not text:
+            return []
+
+        # 匹配 <img> 标签中的 src 属性
+        img_pattern = r'<img[^>]+src=["\']([^"\']+)["\'][^>]*>'
+        matches = re.findall(img_pattern, text, re.IGNORECASE)
+ 
+        # 过滤出有效的图片URL，解码HTML实体，并转换Twitter图片为代理URL
+        image_urls = []
+        for url in matches:
+            # 确保是完整的URL
+            if url.startswith('http'):
+                # 转换Twitter图片URL为代理URL
+                converted_url = self._convert_twitter_image_url(url)
+                image_urls.append(converted_url)
+
+        return image_urls
+
+    def _clean_text(self, text: str) -> str:
+        """清理文本内容，移除HTML标签"""
         if not text or text == "无内容":
             return ""
-        
-        import re
+
         # 移除HTML标签
-        clean_text = str(text)
+        clean_text = re.sub(r'<[^>]+>', '', str(text))
         # 移除多余的空白字符
         clean_text = ' '.join(clean_text.split())
-        
-        if len(clean_text) > max_length:
-            return clean_text[:max_length] + "..."
+
         return clean_text
+
+    def _split_text_to_blocks(self, text: str, max_length: int = 1900) -> List[str]:
+        """将长文本按指定长度分段"""
+        if not text:
+            return []
+
+        # 如果文本长度在限制内，直接返回
+        if len(text) <= max_length:
+            return [text]
+
+        # 按 max_length 字符分段
+        segments = []
+        for i in range(0, len(text), max_length):
+            segment = text[i:i + max_length]
+            segments.append(segment)
+
+        return segments
+
+    def _build_paragraph_blocks(self, text: str) -> List[Dict[str, Any]]:
+        """将文本构建为多个段落块"""
+        blocks = []
+        segments = self._split_text_to_blocks(text)
+
+        for segment in segments:
+            if segment.strip():  # 只添加非空段落
+                blocks.append({
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [{
+                            "type": "text",
+                            "text": {"content": segment}
+                        }]
+                    }
+                })
+
+        return blocks
     
     def push_entry_to_notion(self, entry: dict, user_name: str, platform: str) -> bool:
         """将RSS条目推送到Notion数据库"""
         if not self.enabled:
             return False
-            
+
         try:
             # 准备数据
             title = entry.get('title', '无标题')[:100]  # Notion标题限制
@@ -423,7 +609,11 @@ class NotionManager:
             author = entry.get('author', user_name)[:100]
             published_time = self._parse_published_time(entry.get('published', ''))
             summary = self._clean_text(entry.get('summary', '无摘要'))
-            
+
+            # 提取图片URL
+            raw_summary = entry.get('summary', '')
+            image_urls = self._extract_image_urls(raw_summary)
+
             # 构建 Notion 页面属性
             properties = {
                 "标题": {
@@ -482,34 +672,104 @@ class NotionManager:
                  }
             }
             
-            # 创建页面内容（摘要）
+            # 创建页面内容（摘要和图片）
             children = []
+
+            # 添加摘要文本 - 使用分块功能处理长文本
             if summary:
-                children.append({
-                    "object": "block",
-                    "type": "paragraph",
-                    "paragraph": {
-                        "rich_text": [
-                            {
-                                "type": "text",
-                                "text": {
-                                    "content": summary
+                # 使用新的分块功能，自动将长文本拆分为多个段落
+                summary_blocks = self._build_paragraph_blocks(summary)
+                children.extend(summary_blocks)
+
+                # 显示分块信息
+                if len(summary_blocks) > 1:
+                    print(f"📝 长文本已分为 {len(summary_blocks)} 个段落")
+                else:
+                    print(f"📝 文本长度: {len(summary)} 字符")
+
+            # 添加图片块 - 使用文件上传方式
+            if image_urls:
+                for img_url in image_urls[:5]:  # 最多添加5张图片
+                    try:
+                        print(f"📷 处理图片: {img_url}")
+
+                        # 尝试上传图片到Notion
+                        file_upload_id = self._upload_image_to_notion(img_url)
+
+                        if file_upload_id:
+                            # 使用file_upload方式
+                            children.append({
+                                "object": "block",
+                                "type": "image",
+                                "image": {
+                                    "type": "file_upload",
+                                    "file_upload": {
+                                        "id": file_upload_id
+                                    }
                                 }
+                            })
+                            print(f"✅ 图片上传成功: {file_upload_id}")
+                        else:
+                            # 上传失败，改为文本链接
+                            print(f"⚠️ 图片上传失败，改为文本链接")
+                            children.append({
+                                "object": "block",
+                                "type": "paragraph",
+                                "paragraph": {
+                                    "rich_text": [
+                                        {
+                                            "type": "text",
+                                            "text": {
+                                                "content": "�️ 图片: "
+                                            }
+                                        },
+                                        {
+                                            "type": "text",
+                                            "text": {
+                                                "content": img_url,
+                                                "link": {
+                                                    "url": img_url
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            })
+
+                    except Exception as img_error:
+                        print(f"⚠️ 图片处理失败: {img_error}")
+                        # 添加错误信息作为文本
+                        children.append({
+                            "object": "block",
+                            "type": "paragraph",
+                            "paragraph": {
+                                "rich_text": [{
+                                    "type": "text",
+                                    "text": {
+                                        "content": f"❌ 图片处理失败: {img_url}"
+                                    }
+                                }]
                             }
-                        ]
-                    }
-                })
-            
+                        })
+                        continue
+
             # 推送到 Notion
+            # 打印推送信息
+            print(f"正在推送至 Notion: children: {children}")
             response = self.client.pages.create(
                 parent={"database_id": self.database_id},
                 properties=properties,
                 children=children
             )
-            
-            print(f"✅ 已推送到 Notion: {title[:50]}...")
+
+            # 显示推送结果
+            image_count = len(image_urls) if image_urls else 0
+            if image_count > 0:
+                print(f"✅ 已推送到 Notion: {title[:50]}... (包含 {min(image_count, 5)} 张图片)")
+            else:
+                print(f"✅ 已推送到 Notion: {title[:50]}...")
             return True
-            
+
         except Exception as e:
             print(f"❌ Notion 推送失败: {e}")
             return False
@@ -647,7 +907,7 @@ class RSSManager:
         for i, entry in enumerate(new_entries[:10], 1):  # 最多显示10个新条目
             try:
                 formatted_content = ContentParser.format_entry(entry, i, platform)
-                print(formatted_content)
+                print("formatted_content-----:", formatted_content)
                 
                 # 推送到 Notion 数据库
                 if self.notion_manager.enabled:
@@ -758,10 +1018,10 @@ def main():
         print("=" * 50)
         
         # 测试：只监控特定用户
-        # monitor.monitor_specific_user("GitHub_Daily")
+        monitor.monitor_specific_user("dotey")
         
         # 监控所有用户
-        monitor.monitor_all_users()
+        # monitor.monitor_all_users()
         
         # 示例：监控特定用户
         # monitor.monitor_specific_user("GitHub_Daily")
