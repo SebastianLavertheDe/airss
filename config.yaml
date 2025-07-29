@@ -10,10 +10,10 @@ platforms:
       - id: "OpenAI"
         name: "OpenAI"
     rss_url: 
-      - https://rsshub.pseudoyu.com/twitter/user/{username}
-      - https://rsshub.pseudoyu.com/x/user/{username}
-      - https://rsshub.bestblogs.dev/twitter/user/{username}
-      - https://rsshub.bestblogs.dev/x/user/{username}
+      - https://rsshub.pseudoyu.com/twitter/user/{username}/readable=1&authorNameBold=1&showAuthorInTitle=1&showAuthorInDesc=1&showEmojiForRetweetAndReply=1&showRetweetTextInTitle=0&showTimestampInDescription=1&showQuotedInTitle=1
+      - https://rsshub.pseudoyu.com/x/user/{username}/readable=1&authorNameBold=1&showAuthorInTitle=1&showAuthorInDesc=1&showEmojiForRetweetAndReply=1&showRetweetTextInTitle=0&showTimestampInDescription=1&showQuotedInTitle=1
+      - https://rsshub.bestblogs.dev/twitter/user/{username}/readable=1&authorNameBold=1&showAuthorInTitle=1&showAuthorInDesc=1&showEmojiForRetweetAndReply=1&showRetweetTextInTitle=0&showTimestampInDescription=1&showQuotedInTitle=1
+      - https://rsshub.bestblogs.dev/x/user/{username}/readable=1&authorNameBold=1&showAuthorInTitle=1&showAuthorInDesc=1&showEmojiForRetweetAndReply=1&showRetweetTextInTitle=0&showTimestampInDescription=1&showQuotedInTitle=1
   
   weibo:
     names:
