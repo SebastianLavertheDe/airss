@@ -192,6 +192,36 @@ class NotionManager:
             print(f"❌ 创建数据库失败: {e}")
             self.enabled = False
 
+    def _is_twitter_url(self, url: str) -> bool:
+        """检查是否是有效的Twitter URL"""
+        if not url:
+            return False
+
+        # 支持的Twitter域名
+        twitter_domains = [
+            'twitter.com',
+            'x.com',
+            'mobile.twitter.com',
+            'm.twitter.com'
+        ]
+
+        try:
+            parsed_url = urlparse(url)
+            domain = parsed_url.netloc.lower()
+
+            # 移除 www. 前缀
+            if domain.startswith('www.'):
+                domain = domain[4:]
+
+            # 检查是否是Twitter域名且包含status路径
+            is_twitter_domain = domain in twitter_domains
+            has_status_path = '/status/' in parsed_url.path
+
+            return is_twitter_domain and has_status_path
+
+        except Exception:
+            return False
+
     def test_connection(self) -> bool:
         """测试 Notion 连接"""
         if not self.enabled:
@@ -282,25 +312,25 @@ class NotionManager:
                     "rich_text": [
                         {
                             "text": {
-                                "content": summary[:2000]  # Notion rich_text 限制
+                                "content": summary[:1900]  # Notion rich_text 限制，留安全余量
                             }
                         }
                     ]
                 }
             }
 
-            return self._create_page_with_content(properties, summary, image_urls, image_uploader, title)
+            return self._create_page_with_content(properties, summary, image_urls, image_uploader, title, platform, url)
 
         except Exception as e:
             print(f"❌ Notion 推送失败: {e}")
             return False
 
-    def _create_page_with_content(self, properties: dict, summary: str, image_urls: list, image_uploader, title: str) -> bool:
+    def _create_page_with_content(self, properties: dict, summary: str, image_urls: list, image_uploader, title: str, platform: str, original_url: str) -> bool:
         """创建包含内容的Notion页面"""
         try:
             from ..utils.text_utils import build_paragraph_blocks
 
-            # 创建页面内容（摘要和图片）
+            # 创建页面内容（摘要、图片和Twitter嵌入）
             children = []
 
             # 添加摘要文本 - 使用分块功能处理长文本
@@ -314,6 +344,24 @@ class NotionManager:
                     print(f"📝 长文本已分为 {len(summary_blocks)} 个段落")
                 else:
                     print(f"📝 文本长度: {len(summary)} 字符")
+
+            # 如果是Twitter平台，添加嵌入的原始帖子链接
+            if platform.upper() == "TWITTER" and original_url and self._is_twitter_url(original_url):
+                print(f"🐦 添加Twitter嵌入链接: {original_url}")
+                children.append({
+                    "object": "block",
+                    "type": "embed",
+                    "embed": {
+                        "url": original_url
+                    }
+                })
+
+                # 添加分隔线
+                children.append({
+                    "object": "block",
+                    "type": "divider",
+                    "divider": {}
+                })
 
             # 添加图片块 - 使用文件上传方式
             if image_urls:
