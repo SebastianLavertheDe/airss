@@ -222,6 +222,41 @@ class NotionManager:
         except Exception:
             return False
 
+    def _create_quote_block(self, quoted_tweet: dict) -> dict:
+        """创建Notion引用块"""
+        try:
+            author = quoted_tweet.get('author', '引用内容')
+            content = quoted_tweet.get('content', '')
+
+            if not content:
+                return None
+
+            # 创建引用块
+            quote_block = {
+                "object": "block",
+                "type": "quote",
+                "quote": {
+                    "rich_text": [
+                        {
+                            "type": "text",
+                            "text": {
+                                "content": f"💬 {author}: {content}"
+                            },
+                            "annotations": {
+                                "italic": True
+                            }
+                        }
+                    ],
+                    "color": "gray_background"
+                }
+            }
+
+            return quote_block
+
+        except Exception as e:
+            print(f"⚠️ 创建引用块失败: {e}")
+            return None
+
     def test_connection(self) -> bool:
         """测试 Notion 连接"""
         if not self.enabled:
@@ -246,19 +281,31 @@ class NotionManager:
         try:
             from ..utils.text_utils import clean_text, build_paragraph_blocks, parse_published_time
             from ..notion.image_uploader import NotionImageUploader
+            from ..parsers.twitter_parser import TwitterContentParser
 
             # 准备数据
             title = entry.get('title', '无标题')[:100]  # Notion标题限制
             url = entry.get('link', '')
             author = entry.get('author', user_name)[:100]
             published_time = parse_published_time(entry.get('published', ''))
-            summary = clean_text(entry.get('summary', '无摘要'))
 
-            # 创建图片上传器
+            # 创建图片上传器和Twitter解析器
             image_uploader = NotionImageUploader(self.client)
+            twitter_parser = TwitterContentParser()
+
+            # 获取原始摘要
+            raw_summary = entry.get('summary', '')
+
+            # 如果是Twitter平台，解析引用内容
+            quoted_tweets = []
+            if platform.upper() == "TWITTER":
+                main_content, quoted_tweets = twitter_parser.parse_twitter_content(raw_summary)
+                summary = clean_text(main_content or '无摘要')
+                print(f"🐦 检测到 {len(quoted_tweets)} 个引用推文")
+            else:
+                summary = clean_text(raw_summary or '无摘要')
 
             # 提取图片URL
-            raw_summary = entry.get('summary', '')
             image_urls = image_uploader.extract_image_urls(raw_summary)
 
             # 构建 Notion 页面属性
@@ -319,18 +366,18 @@ class NotionManager:
                 }
             }
 
-            return self._create_page_with_content(properties, summary, image_urls, image_uploader, title, platform, url)
+            return self._create_page_with_content(properties, summary, image_urls, image_uploader, title, platform, url, quoted_tweets)
 
         except Exception as e:
             print(f"❌ Notion 推送失败: {e}")
             return False
 
-    def _create_page_with_content(self, properties: dict, summary: str, image_urls: list, image_uploader, title: str, platform: str, original_url: str) -> bool:
+    def _create_page_with_content(self, properties: dict, summary: str, image_urls: list, image_uploader, title: str, platform: str, original_url: str, quoted_tweets: list = None) -> bool:
         """创建包含内容的Notion页面"""
         try:
             from ..utils.text_utils import build_paragraph_blocks
 
-            # 创建页面内容（摘要、图片和Twitter嵌入）
+            # 创建页面内容（摘要、引用、图片和Twitter嵌入）
             children = []
 
             # 添加摘要文本 - 使用分块功能处理长文本
@@ -344,6 +391,25 @@ class NotionManager:
                     print(f"📝 长文本已分为 {len(summary_blocks)} 个段落")
                 else:
                     print(f"📝 文本长度: {len(summary)} 字符")
+
+            # 添加引用推文块
+            if quoted_tweets:
+                for i, quoted_tweet in enumerate(quoted_tweets):
+                    print(f"📝 添加引用推文 {i+1}: {quoted_tweet.get('author', '未知作者')}")
+
+                    # 创建引用块
+                    quote_block = self._create_quote_block(quoted_tweet)
+                    if quote_block:
+                        children.append(quote_block)
+
+                        # 添加小的间距
+                        children.append({
+                            "object": "block",
+                            "type": "paragraph",
+                            "paragraph": {
+                                "rich_text": []
+                            }
+                        })
 
             # 如果是Twitter平台，添加嵌入的原始帖子链接
             if platform.upper() == "TWITTER" and original_url and self._is_twitter_url(original_url):

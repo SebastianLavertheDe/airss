@@ -3,5 +3,6 @@
 """
 
 from .content_parser import ContentParser
+from .twitter_parser import TwitterContentParser
 
-__all__ = ["ContentParser"]
+__all__ = ["ContentParser", "TwitterContentParser"]
