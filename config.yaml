@@ -9,6 +9,10 @@ platforms:
         name: "AnthropicAI"
       - id: "OpenAI"
         name: "OpenAI"
+      - id: "op7418"
+        name: "歸藏"
+      - id: "hq4ai"
+        name: "汗青 HQ"
     rss_url: 
       - https://rsshub.pseudoyu.com/twitter/user/{username}/readable=1&authorNameBold=1&showAuthorInTitle=1&showAuthorInDesc=1&showEmojiForRetweetAndReply=1&showRetweetTextInTitle=0&showTimestampInDescription=1&showQuotedInTitle=1
       - https://rsshub.pseudoyu.com/x/user/{username}/readable=1&authorNameBold=1&showAuthorInTitle=1&showAuthorInDesc=1&showEmojiForRetweetAndReply=1&showRetweetTextInTitle=0&showTimestampInDescription=1&showQuotedInTitle=1

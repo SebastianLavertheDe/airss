@@ -16,12 +16,13 @@ from urllib.parse import urlparse, parse_qs
 class NotionManager:
     """Notion 数据库管理器"""
     
-    def __init__(self, page_or_db_id: str = "2393c1497bd5808f93a2c7ba9c2d4edd", force_recreate: bool = False):
+    def __init__(self, page_or_db_id: str = None, force_recreate: bool = False):
         """初始化 Notion 客户端"""
-        self.page_or_db_id = page_or_db_id
-        self.database_id = None
+        # 从环境变量读取配置
+        self.page_or_db_id = page_or_db_id or os.getenv("NOTION_PAGE_ID", "2393c1497bd5808f93a2c7ba9c2d4edd")
+        self.database_id = os.getenv("NOTION_DATABASE_ID")
         self.force_recreate = force_recreate
-        self.config_file = "notion_config.json"
+        self.config_file = "notion_config.json"  # 保留用于备份
         notion_key = os.getenv("notion_key")
         
         if not notion_key:
@@ -84,7 +85,17 @@ class NotionManager:
         try:
             # 如果强制重新创建，直接跳到创建步骤
             if not self.force_recreate:
-                # 首先尝试使用保存的数据库ID
+                # 首先尝试使用环境变量中的数据库ID
+                if self.database_id:
+                    try:
+                        response = self.client.databases.retrieve(database_id=self.database_id)
+                        print(f"✅ 找到环境变量配置的数据库: {response.get('title', [{}])[0].get('text', {}).get('content', 'AIRSS')}")
+                        print(f"📋 数据库ID: {self.database_id}")
+                        return
+                    except Exception as e:
+                        print(f"⚠️ 环境变量中的数据库ID无效 ({e})，尝试其他方法")
+
+                # 尝试使用保存的数据库ID（备选方案）
                 saved_db_id = self._get_saved_database_id()
                 if saved_db_id:
                     try:
@@ -96,7 +107,7 @@ class NotionManager:
                     except Exception as e:
                         print(f"⚠️ 保存的数据库ID无效 ({e})，将重新创建数据库")
 
-                # 如果没有保存的ID，尝试直接使用页面ID作为数据库ID
+                # 如果没有有效的数据库ID，尝试直接使用页面ID作为数据库ID
                 try:
                     response = self.client.databases.retrieve(database_id=self.page_or_db_id)
                     self.database_id = self.page_or_db_id
@@ -149,9 +160,6 @@ class NotionManager:
                         ]
                     }
                 },
-                "用户": {
-                    "rich_text": {}
-                },
                 "状态": {
                     "select": {
                         "options": [
@@ -162,6 +170,27 @@ class NotionManager:
                 },
                 "摘要": {
                     "rich_text": {}
+                },
+                "AI总结": {
+                    "rich_text": {}
+                },
+                "AI分类": {
+                    "select": {
+                        "options": [
+                            {"name": "科技资讯", "color": "blue"},
+                            {"name": "人工智能", "color": "purple"},
+                            {"name": "开发工具", "color": "green"},
+                            {"name": "编程技术", "color": "orange"},
+                            {"name": "产品发布", "color": "red"},
+                            {"name": "行业动态", "color": "yellow"},
+                            {"name": "学习资源", "color": "pink"},
+                            {"name": "开源项目", "color": "gray"},
+                            {"name": "创业投资", "color": "brown"},
+                            {"name": "社会热点", "color": "default"},
+                            {"name": "生活娱乐", "color": "blue"},
+                            {"name": "其他", "color": "gray"}
+                        ]
+                    }
                 }
             }
 
@@ -273,7 +302,7 @@ class NotionManager:
             self.enabled = False
             return False
 
-    def push_entry_to_notion(self, entry: dict, user_name: str, platform: str) -> bool:
+    def push_entry_to_notion(self, entry: dict, user_name: str, platform: str, ai_analysis: dict = None) -> bool:
         """将RSS条目推送到Notion数据库"""
         if not self.enabled:
             return False
@@ -341,15 +370,6 @@ class NotionManager:
                         "name": platform.upper()
                     }
                 },
-                "用户": {
-                    "rich_text": [
-                        {
-                            "text": {
-                                "content": user_name
-                            }
-                        }
-                    ]
-                },
                 "状态": {
                     "select": {
                         "name": "新增"
@@ -365,6 +385,23 @@ class NotionManager:
                     ]
                 }
             }
+
+            # 添加AI分析结果到属性中
+            if ai_analysis:
+                properties["AI总结"] = {
+                    "rich_text": [
+                        {
+                            "text": {
+                                "content": ai_analysis.get('summary', '')[:1900]
+                            }
+                        }
+                    ]
+                }
+                properties["AI分类"] = {
+                    "select": {
+                        "name": ai_analysis.get('category', '其他')
+                    }
+                }
 
             return self._create_page_with_content(properties, summary, image_urls, image_uploader, title, platform, url, quoted_tweets)
 

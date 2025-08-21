@@ -33,7 +33,7 @@ def main():
         monitor.list_users()
         
         # 显示平台统计
-        monitor.get_platform_stats()
+        # monitor.get_platform_stats()
         
         # 测试：只监控特定用户
         monitor.monitor_specific_user("dotey")

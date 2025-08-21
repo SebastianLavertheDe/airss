@@ -11,6 +11,7 @@ from ..managers.cache_manager import CacheManager
 from ..managers.config_manager import SocialMediaConfig
 from ..notion.notion_manager import NotionManager
 from ..parsers.content_parser import ContentParser
+from ..ai.deepseek_client import DeepSeekClient
 
 
 class RSSManager:
@@ -21,6 +22,14 @@ class RSSManager:
         self.config = config
         self.cache_manager = CacheManager()
         self.notion_manager = NotionManager()
+        
+        # 初始化AI客户端
+        try:
+            self.ai_client = DeepSeekClient()
+            print("🤖 DeepSeek AI 客户端初始化成功")
+        except Exception as e:
+            print(f"⚠️ DeepSeek AI 客户端初始化失败: {e}")
+            self.ai_client = None
         
         # 显示缓存统计信息
         cached_count, cleaned_count = self.cache_manager.get_cache_stats()
@@ -138,14 +147,45 @@ class RSSManager:
         
         # 处理新条目
         notion_success_count = 0
+        ai_success_count = 0
         for i, entry in enumerate(new_entries, 1):
             # 格式化并显示内容
             formatted_content = ContentParser.format_entry(entry, i, user.platform)
             print(f"formatted_content-----: {formatted_content}")
             
-            # 推送到 Notion
+            # AI 分析处理
+            ai_analysis = None
+            if self.ai_client:
+                try:
+                    print(f"🤖 正在对条目 {i} 进行AI分析...")
+                    
+                    # 提取文本内容用于AI分析
+                    title = getattr(entry, 'title', '')
+                    content = getattr(entry, 'summary', '') or getattr(entry, 'description', '')
+                    
+                    # 清理HTML标签（简单处理）
+                    import re
+                    content = re.sub(r'<[^>]+>', '', content)
+                    
+                    if title or content:
+                        ai_analysis = self.ai_client.analyze_content(title, content)
+                        if ai_analysis:
+                            print(f"   📝 总结: {ai_analysis['summary'][:100]}...")
+                            print(f"   🏷️  分类: {ai_analysis['category']} (置信度: {ai_analysis['confidence']:.2f})")
+                            ai_success_count += 1
+                        else:
+                            print(f"   ❌ AI分析失败")
+                    else:
+                        print(f"   ⚠️ 内容为空，跳过AI分析")
+                        
+                except Exception as e:
+                    print(f"   ❌ AI分析出错: {e}")
+            
+            # 推送到 Notion (包含AI分析结果)
             if self.notion_manager.enabled:
-                success = self.notion_manager.push_entry_to_notion(entry, user.name, user.platform.upper())
+                success = self.notion_manager.push_entry_to_notion(
+                    entry, user.name, user.platform.upper(), ai_analysis
+                )
                 if success:
                     notion_success_count += 1
             
@@ -156,8 +196,14 @@ class RSSManager:
         self.cache_manager.save()
         print(f"💾 已将 {new_count} 个新条目添加到缓存")
         
-        # 显示 Notion 推送统计
-        if self.notion_manager.enabled:
-            print(f"📤 Notion 推送统计: {notion_success_count}/{new_count} 成功")
+        # 显示处理统计
+        print(f"\n📊 处理统计:")
+        if self.ai_client:
+            print(f"🤖 AI分析统计: {ai_success_count}/{new_count} 成功")
         else:
-            print("⚠️ Notion 推送功能未启用")
+            print("⚠️ AI分析功能未启用")
+            
+        if self.notion_manager.enabled:
+            print(f"📤 Notion推送统计: {notion_success_count}/{new_count} 成功")
+        else:
+            print("⚠️ Notion推送功能未启用")
